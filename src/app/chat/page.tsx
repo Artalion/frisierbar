@@ -80,7 +80,7 @@ export default function CustomerChat() {
                 const { data: authData, error: authError } = await supabase.auth.signInAnonymously();
                 if (authError) throw authError;
                 userId = authData.user?.id;
-                setSession(authData.session as any);
+                setSession(authData.session as { user: { id: string } });
             }
 
             if (!userId) return;

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { MessageSquare, Calendar, ChevronRight, Scissors } from 'lucide-react';
 
@@ -48,8 +49,14 @@ export default function Home() {
             <div className="flex items-center gap-2 justify-center px-4">
               <div className="flex -space-x-3">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="w-10 h-10 rounded-full border-4 border-neutral-50 bg-neutral-200 flex items-center justify-center overflow-hidden grayscale hover:grayscale-0 transition-all duration-500">
-                    <img src={`https://i.pravatar.cc/150?u=${i + 10}`} alt="Customer" className="w-full h-full object-cover" />
+                  <div key={i} className="w-10 h-10 rounded-full border-4 border-neutral-50 bg-neutral-200 flex items-center justify-center overflow-hidden grayscale hover:grayscale-0 transition-all duration-500 relative">
+                    <Image
+                      src={`https://i.pravatar.cc/150?u=${i + 10}`}
+                      alt="Customer"
+                      fill
+                      className="object-cover"
+                      unoptimized
+                    />
                   </div>
                 ))}
               </div>
