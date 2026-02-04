@@ -35,12 +35,17 @@ export default function StaffDashboard() {
     // 1. Initial Load & Auth Sync
     useEffect(() => {
         const init = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session?.user) {
-                await fetchProfile(session.user.id);
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user) {
+                    await fetchProfile(session.user.id);
+                }
+                await fetchConversations();
+            } catch (err) {
+                console.error('Initialization Error:', err);
+            } finally {
+                setIsAuthLoading(false);
             }
-            await fetchConversations();
-            setIsAuthLoading(false);
         };
         init();
 
