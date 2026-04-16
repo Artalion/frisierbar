@@ -204,7 +204,8 @@ export default function StaffDashboard() {
         try {
             const res = await fetch('/api/book-appointment', {
                 method: 'POST',
-                body: JSON.stringify({ date, time, service, customerName }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date, time, service, customerName, conversationId: selectedConv }),
             });
             const data = await res.json();
 

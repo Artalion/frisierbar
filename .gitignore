@@ -43,3 +43,7 @@ next-env.d.ts
 # internal tools
 .agent/
 .gemini/
+
+# repo map cache
+REPO_MAP.*
+.repo-map-cache.db
