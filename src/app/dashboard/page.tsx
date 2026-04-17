@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase, Conversation, Message, Profile } from '@/lib/supabase';
+import { supabaseStaff as supabase, Conversation, Message, Profile } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,6 @@ export default function StaffDashboard() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLoggingIn, setIsLoggingIn] = useState(false);
-    const [isAuthLoading, setIsAuthLoading] = useState(true);
 
     // Dashboard State
     const [conversations, setConversations] = useState<(Conversation & { profiles: Profile })[]>([]);
@@ -32,34 +31,8 @@ export default function StaffDashboard() {
     const [showManualForm, setShowManualForm] = useState(false);
     const [manualDetails, setManualDetails] = useState({ date: '', time: '', service: '' });
 
-    // 1. Initial Load & Auth Sync
+    // 1. Realtime: keep conversation list fresh
     useEffect(() => {
-        const init = async () => {
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (session?.user) {
-                    await fetchProfile(session.user.id);
-                }
-                await fetchConversations();
-            } catch (err) {
-                console.error('Initialization Error:', err);
-            } finally {
-                setIsAuthLoading(false);
-            }
-        };
-        init();
-
-        // Auth listener
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (session?.user) {
-                await fetchProfile(session.user.id);
-            } else {
-                setStaffProfile(null);
-            }
-            fetchConversations();
-        });
-
-        // Realtime Conversations
         const convSub = supabase
             .channel('dashboard-pool')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
@@ -67,10 +40,7 @@ export default function StaffDashboard() {
             })
             .subscribe();
 
-        return () => {
-            subscription.unsubscribe();
-            supabase.removeChannel(convSub);
-        };
+        return () => { supabase.removeChannel(convSub); };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // 2. Fetchers
@@ -136,18 +106,23 @@ export default function StaffDashboard() {
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoggingIn(true);
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
             alert("Login fehlgeschlagen: " + error.message);
-        } else {
-            window.location.reload();
+            setIsLoggingIn(false);
+        } else if (data.user) {
+            await fetchProfile(data.user.id);
+            await fetchConversations();
+            setIsLoggingIn(false);
         }
-        setIsLoggingIn(false);
     };
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
-        window.location.reload();
+        setStaffProfile(null);
+        setConversations([]);
+        setSelectedConv(null);
+        setMessages([]);
     };
 
     const sendMessage = async (e: React.FormEvent) => {
@@ -169,6 +144,13 @@ export default function StaffDashboard() {
         await supabase.from('conversations').update({
             assigned_staff_id: staffProfile.id,
             status: 'active'
+        }).eq('id', id);
+    };
+
+    const releaseConversation = async (id: string) => {
+        await supabase.from('conversations').update({
+            assigned_staff_id: null,
+            status: 'pending'
         }).eq('id', id);
     };
 
@@ -222,10 +204,6 @@ export default function StaffDashboard() {
     };
 
     // 5. Render States
-    if (isAuthLoading) {
-        return <div className="h-screen flex items-center justify-center bg-neutral-50 font-medium">Dashboard wird vorbereitet...</div>;
-    }
-
     if (!staffProfile || staffProfile.role !== 'staff') {
         return (
             <div className="flex items-center justify-center min-h-screen bg-neutral-50 p-4">
@@ -343,9 +321,13 @@ export default function StaffDashboard() {
                                 <Button onClick={analyzeMessages} disabled={isAnalyzing} className="bg-neutral-100 text-black hover:bg-neutral-200 font-bold px-5">
                                     {isAnalyzing ? '...' : 'KI ANALYSE'}
                                 </Button>
-                                {conversations.find(c => c.id === selectedConv)?.status === 'pending' && (
+                                {conversations.find(c => c.id === selectedConv)?.assigned_staff_id ? (
+                                    <Button onClick={() => releaseConversation(selectedConv)} className="bg-green-600 text-white hover:bg-green-700 font-bold px-6">
+                                        KI AKTIVIEREN
+                                    </Button>
+                                ) : (
                                     <Button onClick={() => claimConversation(selectedConv)} className="bg-black text-white hover:bg-neutral-800 font-bold px-6">
-                                        ÜBERNEHMEN
+                                        KI PAUSIEREN
                                     </Button>
                                 )}
                             </div>

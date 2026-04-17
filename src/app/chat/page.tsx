@@ -19,6 +19,8 @@ export default function CustomerChat() {
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [streamingMessage, setStreamingMessage] = useState('');
+    const [errorMessage, setErrorMessage] = useState('');
+    const [isStaffActive, setIsStaffActive] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -112,21 +114,22 @@ export default function CustomerChat() {
         setConversationId(convId);
         setIsJoined(true);
 
-        const { data } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', convId)
-            .order('created_at', { ascending: true });
+        const [{ data }, { data: convData }] = await Promise.all([
+            supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true }),
+            supabase.from('conversations').select('assigned_staff_id').eq('id', convId).single(),
+        ]);
 
         const existing = data ?? [];
         setMessages(existing);
+        setIsStaffActive(!!convData?.assigned_staff_id);
 
         // Send AI greeting for brand-new conversations
         if (isNew && existing.length === 0) {
             await saveAiMessage(convId, AI_GREETING);
         }
 
-        const channel = supabase
+        // Listen for new messages
+        supabase
             .channel(`chat:${convId}`)
             .on('postgres_changes', {
                 event: 'INSERT',
@@ -141,7 +144,18 @@ export default function CustomerChat() {
             })
             .subscribe();
 
-        return () => { supabase.removeChannel(channel); };
+        // Listen for staff takeover/release on this conversation
+        supabase
+            .channel(`conv:${convId}`)
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'conversations',
+                filter: `id=eq.${convId}`,
+            }, (payload) => {
+                setIsStaffActive(!!(payload.new as { assigned_staff_id: string | null }).assigned_staff_id);
+            })
+            .subscribe();
     };
 
     const saveAiMessage = async (convId: string, text: string) => {
@@ -156,28 +170,35 @@ export default function CustomerChat() {
     };
 
     const getAiResponse = async (convId: string, history: { role: 'user' | 'assistant'; content: string }[]) => {
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: history }),
-        });
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: history }),
+            });
 
-        if (!res.ok || !res.body) return;
+            if (!res.ok || !res.body) {
+                setErrorMessage('Antwort fehlgeschlagen. Bitte erneut versuchen.');
+                return;
+            }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let fullText = '';
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value);
-            fullText += chunk;
-            setStreamingMessage(fullText);
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const chunk = decoder.decode(value);
+                fullText += chunk;
+                setStreamingMessage(fullText);
+            }
+
+            setStreamingMessage('');
+            await saveAiMessage(convId, fullText);
+        } catch {
+            setErrorMessage('Verbindungsfehler. Bitte Internetverbindung prüfen.');
         }
-
-        setStreamingMessage('');
-        await saveAiMessage(convId, fullText);
     };
 
     const sendMessage = async (e: React.FormEvent) => {
@@ -186,6 +207,7 @@ export default function CustomerChat() {
 
         const text = content.trim();
         setContent('');
+        setErrorMessage('');
         setIsSending(true);
 
         const { data: inserted } = await supabase
@@ -204,7 +226,9 @@ export default function CustomerChat() {
             content: m.content,
         }));
 
-        await getAiResponse(conversationId, history);
+        if (!isStaffActive) {
+            await getAiResponse(conversationId, history);
+        }
         setIsSending(false);
     };
 
@@ -247,9 +271,15 @@ export default function CustomerChat() {
                 </div>
                 <div>
                     <h2 className="font-semibold">Frisierbar</h2>
-                    <p className="text-xs text-green-500 flex items-center gap-1">
-                        <span className="w-2 h-2 bg-green-500 rounded-full" /> Online
-                    </p>
+                    {isStaffActive ? (
+                        <p className="text-xs text-blue-500 flex items-center gap-1">
+                            <span className="w-2 h-2 bg-blue-500 rounded-full" /> Team antwortet persönlich
+                        </p>
+                    ) : (
+                        <p className="text-xs text-green-500 flex items-center gap-1">
+                            <span className="w-2 h-2 bg-green-500 rounded-full" /> Online
+                        </p>
+                    )}
                 </div>
             </div>
 
@@ -278,8 +308,8 @@ export default function CustomerChat() {
                     </div>
                 )}
 
-                {/* Typing indicator (waiting for stream to start) */}
-                {isSending && !streamingMessage && (
+                {/* Typing indicator (waiting for stream to start) — only when AI is responding */}
+                {isSending && !streamingMessage && !isStaffActive && (
                     <div className="flex justify-start">
                         <div className="px-4 py-3 rounded-2xl bg-white border border-neutral-100 shadow-sm flex gap-1 items-center rounded-tl-none">
                             {[0, 1, 2].map(i => (
@@ -293,6 +323,12 @@ export default function CustomerChat() {
                     </div>
                 )}
             </div>
+
+            {errorMessage && (
+                <div className="px-4 py-2 bg-red-50 border-t border-red-100 text-red-600 text-xs text-center">
+                    {errorMessage}
+                </div>
+            )}
 
             <form onSubmit={sendMessage} className="p-4 bg-white border-t flex gap-2">
                 <Input

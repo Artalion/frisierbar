@@ -7,7 +7,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.warn('Supabase URL or Anon Key is missing. Check your environment variables.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Customer client — used in /chat (anonymous auth)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { storageKey: 'frisierbar-customer' },
+});
+
+// Staff client — used in /dashboard (email/password auth)
+export const supabaseStaff = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { storageKey: 'frisierbar-staff' },
+});
 
 export type Profile = {
     id: string;
