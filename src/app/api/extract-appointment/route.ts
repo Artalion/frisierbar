@@ -1,42 +1,34 @@
 import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { extractAppointment } from '@/features/appointment-extraction';
+import { AppointmentExtractionError } from '@/features/appointment-extraction/extract';
 
-const groq = new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: 'https://api.groq.com/openai/v1',
-});
-
+/**
+ * POST /api/extract-appointment
+ *
+ * Die konkrete Extraktions-Logik wird per Doggle-Toggle injiziert.
+ * Toggle: 'legacy-appointment-extraction' (default: false = neue Impl.)
+ *
+ * Umschalten auf Legacy:
+ *   NEXT_PUBLIC_DOGGLE_LEGACY_APPOINTMENT_EXTRACTION=true
+ */
 export async function POST(req: Request) {
     try {
         const { messages } = await req.json();
-
-        const completion = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-                {
-                    role: 'system' as const,
-                    content: `Du bist ein Assistent für einen Friseursalon. Analysiere den Chatverlauf und extrahiere Termindetails.
-Antworte ausschließlich mit einem JSON-Objekt in diesem Format:
-{
-  "date": "YYYY-MM-DD oder null",
-  "time": "HH:mm oder null",
-  "service": "Dienstleistung oder null",
-  "missing_info": ["Liste fehlender Infos"]
-}
-Kein weiterer Text, nur das JSON.`,
-                },
-                {
-                    role: 'user' as const,
-                    content: `Chatverlauf:\n${(messages as { role: string; content: string }[]).map((m) => `${m.role}: ${m.content}`).join('\n')}`,
-                },
-            ],
-            response_format: { type: 'json_object' },
-        });
-
-        const appointment = JSON.parse(completion.choices[0].message.content || '{}');
+        const appointment = await extractAppointment(messages);
         return NextResponse.json(appointment);
     } catch (error) {
-        console.error('AI Extraction Error:', error);
-        return NextResponse.json({ error: 'Failed to extract appointment info' }, { status: 500 });
+        if (error instanceof AppointmentExtractionError) {
+            console.error('[extract-appointment] Extraction failed:', error.message, error.cause);
+            return NextResponse.json(
+                { error: error.message },
+                { status: 422 },
+            );
+        }
+
+        console.error('[extract-appointment] Unexpected error:', error);
+        return NextResponse.json(
+            { error: 'Failed to extract appointment info' },
+            { status: 500 },
+        );
     }
 }

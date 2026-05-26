@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Send } from 'lucide-react';
+import { getAiResponse } from '@/features/chat';
 
 const AI_GREETING = 'Hallo! Willkommen bei der Frisierbar. 😊 Wann darf ich Sie einplanen? Bitte nennen Sie mir Ihren Wunschtermin (Datum und Uhrzeit) sowie die gewünschte Dienstleistung.';
 
@@ -169,36 +170,15 @@ export default function CustomerChat() {
         }
     };
 
-    const getAiResponse = async (convId: string, history: { role: 'user' | 'assistant'; content: string }[]) => {
-        try {
-            const res = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages: history }),
-            });
-
-            if (!res.ok || !res.body) {
-                setErrorMessage('Antwort fehlgeschlagen. Bitte erneut versuchen.');
-                return;
-            }
-
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let fullText = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const chunk = decoder.decode(value);
-                fullText += chunk;
-                setStreamingMessage(fullText);
-            }
-
-            setStreamingMessage('');
-            await saveAiMessage(convId, fullText);
-        } catch {
-            setErrorMessage('Verbindungsfehler. Bitte Internetverbindung prüfen.');
-        }
+    const fetchAiResponse = async (convId: string, history: { role: 'user' | 'assistant'; content: string }[]) => {
+        await getAiResponse(history, {
+            onChunk:    (text) => setStreamingMessage(text),
+            onComplete: async (fullText) => {
+                setStreamingMessage('');
+                await saveAiMessage(convId, fullText);
+            },
+            onError: (msg) => setErrorMessage(msg),
+        });
     };
 
     const sendMessage = async (e: React.FormEvent) => {
@@ -227,7 +207,7 @@ export default function CustomerChat() {
         }));
 
         if (!isStaffActive) {
-            await getAiResponse(conversationId, history);
+            await fetchAiResponse(conversationId, history);
         }
         setIsSending(false);
     };
